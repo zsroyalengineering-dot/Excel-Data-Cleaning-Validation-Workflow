@@ -1,0 +1,195 @@
+{
+  "name": "Module 3 Assignment-Clean a Messy Excel File Using n8n",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Massy Data",
+        "formDescription": "automatically cleans a messy Excel file",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Data",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".xlsx"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -800,
+        64
+      ],
+      "id": "2de09945-4761-4590-8627-4e74bf17b616",
+      "name": "On form submission",
+      "webhookId": "dd4535ff-24ea-4687-b712-65395b1d9228"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "Data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        64
+      ],
+      "id": "68bba9b8-c1cc-4f8a-ba66-ca6cdedd45c0",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst output = [];\n\n// ===============================\n// STATISTICS\n// ===============================\n\nconst totalRowsImported = items.length;\n\n// Extract from File drops fully blank Excel rows.\n// The uploaded workbook has 31 data rows (row 1 is the header) and 2 blank rows.\nconst originalDataRows = 31;\nconst emptyRowsRemoved = Math.max(originalDataRows - totalRowsImported, 0);\n\nlet invalidEmailsRemoved = 0;\nlet invalidPhonesRemoved = 0;\nlet invalidDatesRemoved = 0;\nlet duplicateRowsRemoved = 0;\n\n\n// ===============================\n// DUPLICATE TRACKING\n// ===============================\n\nconst seenEmails = new Set();\nconst seenPhones = new Set();\n\n\n// ===============================\n// HELPER FUNCTIONS\n// ===============================\n\nfunction cleanSpaces(value) {\n  if (value === null || value === undefined) {\n    return '';\n  }\n\n  return String(value)\n    .trim()\n    .replace(/\\s+/g, ' ');\n}\n\n\nfunction properCase(value) {\n  return cleanSpaces(value)\n    .toLowerCase()\n    .replace(/\\b\\w/g, c => c.toUpperCase());\n}\n\n\nfunction cleanEmail(value) {\n  return cleanSpaces(value).toLowerCase();\n}\n\n\nfunction cleanPhone(value) {\n\n  if (value === null || value === undefined) {\n    return '';\n  }\n\n  let phone = String(value)\n    .trim()\n    .replace(/\\s+/g, '')\n    .replace(/-/g, '');\n\n  // +8801710841232\n  if (phone.startsWith('+880')) {\n    phone = '0' + phone.substring(4);\n  }\n\n  // 8801710841232\n  else if (\n    phone.startsWith('880') &&\n    phone.length === 13\n  ) {\n    phone = '0' + phone.substring(3);\n  }\n\n  // 1710841232\n  else if (/^1\\d{9}$/.test(phone)) {\n    phone = '0' + phone;\n  }\n\n  return phone;\n}\n\n\nfunction validEmail(email) {\n  return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email);\n}\n\n\nfunction validPhone(phone) {\n  return /^01\\d{9}$/.test(phone);\n}\n\n\n// ===============================\n// DATE FORMATTER\n// ===============================\n\nfunction formatDate(value) {\n\n  if (\n    value === null ||\n    value === undefined ||\n    value === ''\n  ) {\n    return '';\n  }\n\n\n  // -------------------------------\n  // Excel Serial Date\n  // -------------------------------\n\n  const numericValue = Number(value);\n\n  if (\n    String(value).trim() !== '' &&\n    Number.isFinite(numericValue) &&\n    numericValue >= 1 &&\n    numericValue <= 100000\n  ) {\n\n    const excelEpoch = new Date(\n      Date.UTC(1899, 11, 30)\n    );\n\n    const date = new Date(\n      excelEpoch.getTime() +\n      numericValue * 86400000\n    );\n\n    return `${date.getUTCFullYear()}-${String(\n      date.getUTCMonth() + 1\n    ).padStart(2, '0')}-${String(\n      date.getUTCDate()\n    ).padStart(2, '0')}`;\n  }\n\n\n  const str = cleanSpaces(value);\n\n\n  // -------------------------------\n  // YYYY-MM-DD\n  // -------------------------------\n\n  let match = str.match(\n    /^(\\d{4})-(\\d{1,2})-(\\d{1,2})$/\n  );\n\n  if (match) {\n\n    const year = Number(match[1]);\n    const month = Number(match[2]);\n    const day = Number(match[3]);\n\n    const date = new Date(\n      Date.UTC(year, month - 1, day)\n    );\n\n    if (\n      date.getUTCFullYear() === year &&\n      date.getUTCMonth() === month - 1 &&\n      date.getUTCDate() === day\n    ) {\n\n      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n    }\n\n    return '';\n  }\n\n\n  // -------------------------------\n  // Slash Dates\n  // -------------------------------\n\n  match = str.match(\n    /^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/\n  );\n\n  if (match) {\n\n    const first = Number(match[1]);\n    const second = Number(match[2]);\n    const year = Number(match[3]);\n\n    let day;\n    let month;\n\n\n    // MM/DD/YYYY\n    // 7/20/2026\n    if (second > 12) {\n\n      month = first;\n      day = second;\n\n    }\n\n\n    // DD/MM/YYYY\n    // 20/02/2025\n    else if (first > 12) {\n\n      day = first;\n      month = second;\n\n    }\n\n\n    // Ambiguous → DD/MM/YYYY\n    else {\n\n      day = first;\n      month = second;\n\n    }\n\n\n    const date = new Date(\n      Date.UTC(year, month - 1, day)\n    );\n\n\n    if (\n      date.getUTCFullYear() === year &&\n      date.getUTCMonth() === month - 1 &&\n      date.getUTCDate() === day\n    ) {\n\n      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n    }\n\n    return '';\n  }\n\n\n  // -------------------------------\n  // Text Dates\n  // -------------------------------\n\n  let normalized = str.replace(\n    /^([A-Za-z]+),\\s*(\\d{1,2})/,\n    '$1 $2'\n  );\n\n\n  // May 2, 2025\n  // Jun 26 2025\n  // May 2 2025\n\n  let parsed = new Date(normalized);\n\n\n  if (!isNaN(parsed.getTime())) {\n\n    return `${parsed.getFullYear()}-${String(\n      parsed.getMonth() + 1\n    ).padStart(2, '0')}-${String(\n      parsed.getDate()\n    ).padStart(2, '0')}`;\n  }\n\n\n  // -------------------------------\n  // DD-MMM-YY\n  // 2-May-26\n  // 20-Jul-26\n  // -------------------------------\n\n  match = str.match(\n    /^(\\d{1,2})-([A-Za-z]+)-(\\d{2,4})$/\n  );\n\n  if (match) {\n\n    const day = Number(match[1]);\n\n    const monthName =\n      match[2].toLowerCase();\n\n    let year =\n      Number(match[3]);\n\n\n    const months = {\n\n      jan: 1,\n      january: 1,\n\n      feb: 2,\n      february: 2,\n\n      mar: 3,\n      march: 3,\n\n      apr: 4,\n      april: 4,\n\n      may: 5,\n\n      jun: 6,\n      june: 6,\n\n      jul: 7,\n      july: 7,\n\n      aug: 8,\n      august: 8,\n\n      sep: 9,\n      september: 9,\n\n      oct: 10,\n      october: 10,\n\n      nov: 11,\n      november: 11,\n\n      dec: 12,\n      december: 12\n    };\n\n\n    const month =\n      months[monthName];\n\n\n    if (!month) {\n      return '';\n    }\n\n\n    if (year < 100) {\n      year += 2000;\n    }\n\n\n    const date = new Date(\n      Date.UTC(\n        year,\n        month - 1,\n        day\n      )\n    );\n\n\n    if (\n      date.getUTCFullYear() === year &&\n      date.getUTCMonth() === month - 1 &&\n      date.getUTCDate() === day\n    ) {\n\n      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n    }\n\n\n    return '';\n  }\n\n\n  return '';\n}\n\n\n// ===============================\n// PROCESS EVERY ROW\n// ===============================\n\nfor (const item of items) {\n\n  const row = item.json;\n\n\n  // -------------------------------\n  // CLEAN DATA\n  // -------------------------------\n\n  const fullName =\n    properCase(row['Full Name']);\n\n  const email =\n    cleanEmail(row['Email']);\n\n  const phone =\n    cleanPhone(row['Phone']);\n\n  const city =\n    properCase(row['City']);\n\n  const registrationDate =\n    formatDate(row['Registration Date']);\n\n\n  // -------------------------------\n  // EMPTY ROW\n  // -------------------------------\n\n  if (\n    !fullName &&\n    !email &&\n    !phone\n  ) {\n\n    continue;\n  }\n\n\n  // -------------------------------\n  // INVALID EMAIL\n  // -------------------------------\n\n  if (!validEmail(email)) {\n\n    invalidEmailsRemoved++;\n\n    continue;\n  }\n\n\n  // -------------------------------\n  // INVALID PHONE\n  // -------------------------------\n\n  if (!validPhone(phone)) {\n\n    invalidPhonesRemoved++;\n\n    continue;\n  }\n\n\n  // -------------------------------\n  // INVALID DATE\n  // -------------------------------\n\n  if (!registrationDate) {\n\n    invalidDatesRemoved++;\n\n    continue;\n  }\n\n\n  // -------------------------------\n  // DUPLICATE\n  // Email OR Phone\n  // -------------------------------\n\n  if (\n    seenEmails.has(email) ||\n    seenPhones.has(phone)\n  ) {\n\n    duplicateRowsRemoved++;\n\n    continue;\n  }\n\n\n  seenEmails.add(email);\n  seenPhones.add(phone);\n\n\n  // -------------------------------\n  // CUSTOMER ID\n  // -------------------------------\n\n  const customerID =\n    `CUST-${String(output.length + 1).padStart(4, '0')}`;\n\n\n  // -------------------------------\n  // CLEAN CUSTOMER RECORD\n  // -------------------------------\n\n  output.push({\n\n    json: {\n\n      \"Customer ID\":\n        customerID,\n\n      \"Full Name\":\n        fullName,\n\n      \"Email\":\n        email,\n\n      \"Phone\":\n        phone,\n\n      \"City\":\n        city,\n\n      \"Registration Date\":\n        registrationDate,\n\n      \"_summary\": {\n        totalRowsImported,\n        emptyRowsRemoved,\n        invalidEmailsRemoved,\n        invalidPhonesRemoved,\n        invalidDatesRemoved,\n        duplicateRowsRemoved,\n        finalRowCount: output.length + 1\n      }\n\n    }\n\n  });\n}\n\n\n// ===============================\n// UPDATE FINAL SUMMARY\n// ===============================\n\nconst finalStats = {\n\n  totalRowsImported,\n\n  emptyRowsRemoved,\n\n  invalidEmailsRemoved,\n\n  invalidPhonesRemoved,\n\n  invalidDatesRemoved,\n\n  duplicateRowsRemoved,\n\n  finalRowCount: output.length\n\n};\n\n\n// Put final summary into every item\nreturn output.map(item => ({\n\n  json: {\n\n    ...item.json,\n\n    _summary: finalStats\n\n  }\n\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        64
+      ],
+      "id": "edd577b5-7293-4b5b-965a-84e83362d3ca",
+      "name": "Clean & Validate + Statistics",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst summary = items.length > 0\n  ? items[0].json._summary\n  : {\n      totalRowsImported: 0,\n      emptyRowsRemoved: 0,\n      invalidEmailsRemoved: 0,\n      invalidPhonesRemoved: 0,\n      invalidDatesRemoved: 0,\n      duplicateRowsRemoved: 0,\n      finalRowCount: 0\n    };\n\nconst report = `\nCUSTOMER DATA CLEANING SUMMARY REPORT\n=====================================\n\nTotal Rows Imported: ${summary.totalRowsImported}\n\nEmpty/Invalid Rows Removed: ${\n  summary.emptyRowsRemoved + summary.invalidDatesRemoved\n}\n\nDuplicate Rows Removed: ${summary.duplicateRowsRemoved}\n\nInvalid Emails Removed: ${summary.invalidEmailsRemoved}\n\nInvalid Phones Removed: ${summary.invalidPhonesRemoved}\n\nFinal Row Count: ${summary.finalRowCount}\n\n=====================================\nCleaning completed successfully.\n`.trim();\n\nreturn [\n  {\n    json: {\n      report\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        144
+      ],
+      "id": "1b4fbf05-5b0a-43f0-a664-a34da7e9b8cf",
+      "name": "Create Summary Report"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "fileName": "clean_customers.xlsx"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -80,
+        0
+      ],
+      "id": "3588a53e-45e3-4c69-8050-c0bf14f1c07a",
+      "name": "Cleaned Excel File"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "report",
+        "binaryPropertyName": "Text",
+        "options": {
+          "fileName": "summary_report.txt"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -64,
+        144
+      ],
+      "id": "32a25400-d29e-47c8-b1eb-1fcf6dab8a2f",
+      "name": "Summary Report "
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n\n  const {\n    _summary,\n    ...customer\n  } = item.json;\n\n  return {\n    json: customer\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "8751d23d-dc01-4e81-88d0-0606379b0eac",
+      "name": "Remove Summary"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Clean & Validate + Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean & Validate + Statistics": {
+      "main": [
+        [
+          {
+            "node": "Create Summary Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remove Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Summary Report": {
+      "main": [
+        [
+          {
+            "node": "Summary Report ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Summary": {
+      "main": [
+        [
+          {
+            "node": "Cleaned Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "326f690b-563b-46b4-8044-8abe8877852f",
+  "meta": {
+    "instanceId": "f2e8024efae72c83c6ff55cf75a75f0e1473dca1d80e0bc3eba02db8ae71bc14"
+  },
+  "nodeGroups": [],
+  "id": "q50LgBp8UQ1IsTkc",
+  "tags": []
+}
