@@ -1,5 +1,5 @@
 {
-  "name": "Module 3 Assignment-Clean a Messy Excel File Using n8n",
+  "name": "Clean a Messy data in Excel File Using n8n",
   "nodes": [
     {
       "parameters": {
